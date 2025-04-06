@@ -1,0 +1,87 @@
+
+
+#!/bin/bash
+
+# List of apps to skip
+skip_list=("Finder" "Terminal" "SystemUIServer" "Dock" "loginwindow")
+
+echo "🔍 Checking for open apps..."
+
+# Get list of open apps
+apps=$(osascript -e 'tell application "System Events" to get name of (every process whose background only is false)')
+IFS=',' read -ra app_list <<< "$apps"
+
+for app in "${app_list[@]}"; do
+  app_clean=$(echo "$app" | xargs) # Remove whitespace
+
+  # Skip essential apps
+  skip=false
+  for skip_app in "${skip_list[@]}"; do
+    if [[ "$app_clean" == "$skip_app" ]]; then
+      skip=true
+      break
+    fi
+  done
+
+  if [[ "$skip" == false ]]; then
+    echo "🔄 Attempting to quit $app_clean"
+
+    # Try graceful quit
+    osascript <<EOF
+try
+  tell application "$app_clean" to quit
+end try
+EOF
+
+    # Wait for dialogs to appear
+    sleep 2
+
+    # Try clicking "Don't Save", "Save", or "OK"
+    osascript <<EOF
+try
+  tell application "System Events"
+    repeat with p in (every process whose name is "$app_clean")
+      try
+        click button "Don't Save" of window 1 of p
+      end try
+      try
+        click button "Save" of window 1 of p
+        delay 1
+        keystroke "$app_clean backup"
+        delay 1
+        keystroke return
+      end try
+      try
+        click button "OK" of window 1 of p
+      end try
+    end repeat
+  end tell
+end try
+EOF
+
+    # Special handling for Microsoft Word "Save As" dialog
+    if [[ "$app_clean" == "Microsoft Word" ]]; then
+      echo "📝 Word Save As dialog detected. Attempting to press Return to save..."
+      osascript <<EOF
+try
+  tell application "System Events"
+    keystroke return
+  end tell
+end try
+EOF
+      sleep 2
+    fi
+
+    # Check if app is still running
+    is_open=$(osascript -e "application \"$app_clean\" is running")
+
+    if [[ "$is_open" == "true" ]]; then
+      echo "💣 $app_clean still open. Force quitting..."
+      pkill -f "$app_clean"
+    else
+      echo "✅ $app_clean closed"
+    fi
+  fi
+done
+
+echo "🎉 All apps processed."
